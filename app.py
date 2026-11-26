@@ -1,4 +1,3 @@
-
 from io import BytesIO
 
 import numpy as np
@@ -13,7 +12,6 @@ from scipy.signal import stft, istft, savgol_filter
 
 # =========================================================
 # 1. KONFIGURASI APLIKASI
-# Harus menjadi perintah Streamlit pertama.
 # =========================================================
 
 st.set_page_config(
@@ -503,13 +501,9 @@ def calculate_metrics(clean, noisy, filtered):
         "RMSE": rmse,
         "Peningkatan SNR (dB)": improvement
     }
-
-
 # =========================================================
 # 9. GRAFIK SINYAL
 # =========================================================
-
-
 
 def make_signal_chart(
     time,
@@ -538,7 +532,7 @@ def make_signal_chart(
     noisy_plot = noisy[mask][::step]
     filtered_plot = filtered[mask][::step]
 
-    # Buat satu grafik dengan tiga garis
+    # Satu grafik dengan tiga garis
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -920,9 +914,7 @@ with st.sidebar:
         <span>Polynomial order: 3</span>
     </div>
     """, unsafe_allow_html=True)
-
-
-# =========================================================
+    # =========================================================
 # 13. PROSES UTAMA APLIKASI
 # =========================================================
 
@@ -959,6 +951,19 @@ try:
         duration = len(clean_signal) / sample_rate
 
         clean_signal = normalize_signal(clean_signal)
+
+        # Diagnostik WAV
+        st.write("Diagnostik WAV:")
+        st.write({
+            "Sampling rate": sample_rate,
+            "Durasi audio": round(duration, 3),
+            "Jumlah sampel": len(clean_signal),
+            "Amplitudo minimum": float(np.min(clean_signal)),
+            "Amplitudo maksimum": float(np.max(clean_signal)),
+            "RMS sinyal": float(
+                np.sqrt(np.mean(clean_signal ** 2))
+            )
+        })
 
     elif source == "Contoh audio referensi":
 
@@ -1047,6 +1052,7 @@ try:
         .reset_index(drop=True)
     )
 
+    
     # =====================================================
     # 14. HEADER
     # =====================================================
@@ -1378,8 +1384,7 @@ try:
             "filter yang lebih baik, sedangkan RMSE yang lebih rendah "
             "menunjukkan hasil lebih dekat dengan sinyal referensi bersih."
         )
-
-    # =====================================================
+           # =====================================================
     # 17. METODOLOGI
     # =====================================================
 
@@ -1428,11 +1433,10 @@ try:
             "Ketiga metode menggunakan sinyal noisy, sampling rate, "
             "durasi, dan seed yang sama agar perbandingan lebih adil."
         )
-    # =====================================================
-    # AUDIO PLAYBACK: SEBELUM DAN SESUDAH FILTERING
-    # =====================================================
 
-    from io import BytesIO
+    # =====================================================
+    # 18. AUDIO PLAYBACK: SEBELUM DAN SESUDAH FILTERING
+    # =====================================================
 
     st.markdown("---")
     st.markdown("## Dengarkan Hasil Denoising")
@@ -1528,8 +1532,9 @@ try:
                 filtered_wav,
                 format="audio/wav"
             )
+
     # =====================================================
-    # 18. FOOTER
+    # 19. FOOTER
     # =====================================================
 
     st.markdown("""
@@ -1549,79 +1554,115 @@ except Exception as error:
 
 
 # =====================================================
-# GRAFIK PERBANDINGAN WAVEFORM KETIGA METODE
+# 20. GRAFIK PERBANDINGAN WAVEFORM KETIGA METODE
 # =====================================================
 
-st.markdown("---")
-st.markdown("## Perbandingan waveform ketiga metode")
+# Grafik harus berada di dalam try agar hanya dijalankan
+# setelah sinyal dan ketiga hasil filter berhasil diproses.
 
-st.caption(
-    f"Perbandingan sinyal bersih, sinyal noisy, dan hasil "
-    f"ketiga metode denoising pada noise {noise_percent}% RMS."
-)
+if "results" in locals() and "clean_signal" in locals():
 
-# Ambil hasil filter dari dictionary results
-wiener_signal = results["Wiener Filter (STFT)"]
-savgol_signal = results["Savitzky-Golay Filter"]
-wavelet_signal = results["Wavelet Denoising"]
+    st.markdown("---")
+    st.markdown("## Perbandingan waveform ketiga metode")
 
-# Batasi tampilan grafik agar lebih mudah dibaca
-view_duration = min(0.5, len(clean_signal) / sample_rate)
-max_points = 5000
+    st.caption(
+        f"Perbandingan sinyal bersih, sinyal noisy, dan hasil "
+        f"ketiga metode denoising pada noise {noise_percent}% RMS."
+    )
 
-sample_count = min(
-    len(clean_signal),
-    int(view_duration * sample_rate)
-)
+    # Ambil hasil filter dari dictionary results
+    wiener_signal = results["Wiener Filter (STFT)"]
+    savgol_signal = results["Savitzky-Golay Filter"]
+    wavelet_signal = results["Wavelet Denoising"]
 
-step = max(1, int(np.ceil(sample_count / max_points)))
+    # -----------------------------------------------------
+# PENGATURAN RENTANG WAKTU GRAFIK
+# -----------------------------------------------------
 
-time_plot = (
-    np.arange(sample_count)[::step] / sample_rate
-)
+total_duration = len(clean_signal) / sample_rate
 
-clean_plot = clean_signal[:sample_count:step]
-noisy_plot = noisy_signal[:sample_count:step]
-wiener_plot = wiener_signal[:sample_count:step]
-savgol_plot = savgol_signal[:sample_count:step]
-wavelet_plot = wavelet_signal[:sample_count:step]
+# Rentang awal grafik
+default_duration = min(0.07, total_duration)
+
+# Jumlah sampel untuk menampilkan seluruh durasi audio
+sample_count = len(clean_signal)
+time_plot = np.arange(sample_count) / sample_rate
+
+clean_plot = clean_signal[:sample_count]
+noisy_plot = noisy_signal[:sample_count]
+wiener_plot = wiener_signal[:sample_count]
+savgol_plot = savgol_signal[:sample_count]
+wavelet_plot = wavelet_signal[:sample_count]
 
 fig = go.Figure()
 
 signals = [
-    (clean_plot, "Sinyal bersih (referensi)", "#16A34A", 2.4),
-    (noisy_plot, f"Sinyal noisy ({noise_percent}%)", "#F59E0B", 1.3),
-    (wiener_plot, "Wiener Filter (STFT)", "#2563EB", 1.8),
-    (savgol_plot, "Savitzky-Golay", "#9333EA", 1.8),
-    (wavelet_plot, "Wavelet Denoising", "#DC2626", 1.8),
-]
+        (
+            clean_plot,
+            "Sinyal bersih (referensi)",
+            "#16A34A",
+            2.4
+        ),
+        (
+            noisy_plot,
+            f"Sinyal noisy ({noise_percent}%)",
+            "#F59E0B",
+            1.3
+        ),
+        (
+            wiener_plot,
+            "Wiener Filter (STFT)",
+            "#2563EB",
+            1.8
+        ),
+        (
+            savgol_plot,
+            "Savitzky-Golay",
+            "#9333EA",
+            1.8
+        ),
+        (
+            wavelet_plot,
+            "Wavelet Denoising",
+            "#DC2626",
+            1.8
+        ),
+    ]
 
 for signal, name, color, width in signals:
-    fig.add_trace(
-        go.Scatter(
-            x=time_plot,
-            y=signal,
-            mode="lines",
-            name=name,
-            line=dict(
-                color=color,
-                width=width
+
+        fig.add_trace(
+            go.Scatter(
+                x=time_plot,
+                y=signal,
+                mode="lines",
+                name=name,
+                line=dict(
+                    color=color,
+                    width=width
+                )
             )
         )
-    )
 
 fig.update_layout(
     title=dict(
         text="Perbandingan Waveform Sebelum dan Sesudah Reduksi Derau",
         x=0.5,
         xanchor="center",
-        font=dict(size=19, color="#172033")
+        font=dict(
+            size=19,
+            color="#172033"
+        )
     ),
     xaxis_title="Waktu (detik)",
     yaxis_title="Amplitudo",
     template="plotly_white",
-    height=600,
+    height=650,
     hovermode="x unified",
+
+    # Mempertahankan posisi zoom saat noise/filter berubah
+    uirevision="waveform-noiseclean",
+
     font=dict(
         family="Arial",
         size=13,
@@ -1644,16 +1685,38 @@ fig.update_layout(
     paper_bgcolor="#FFFFFF"
 )
 
+# Tampilan awal grafik: 0 sampai 0,07 detik
 fig.update_xaxes(
+    range=[0, 0.07],
     showgrid=True,
-    gridcolor="#E5E7EB"
+    gridcolor="#E5E7EB",
+    rangeslider=dict(
+        visible=True,
+        thickness=0.06
+    )
 )
 
+# Skala amplitudo mengikuti data pada rentang yang ditampilkan
+visible_signals = np.concatenate([
+    clean_plot,
+    noisy_plot,
+    wiener_plot,
+    savgol_plot,
+    wavelet_plot
+])
+
+y_min = float(np.min(visible_signals))
+y_max = float(np.max(visible_signals))
+
+y_padding = max((y_max - y_min) * 0.12, 0.01)
+
 fig.update_yaxes(
+    range=[y_min - y_padding, y_max + y_padding],
     showgrid=True,
     gridcolor="#E5E7EB",
     zeroline=True,
-    zerolinecolor="#94A3B8"
+    zerolinecolor="#94A3B8",
+    automargin=True
 )
 
 st.plotly_chart(
@@ -1661,6 +1724,7 @@ st.plotly_chart(
     use_container_width=True,
     config={
         "displaylogo": False,
+        "scrollZoom": True,
         "toImageButtonOptions": {
             "format": "png",
             "filename": "Perbandingan_Waveform_3_Metode",
