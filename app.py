@@ -1428,7 +1428,106 @@ try:
             "Ketiga metode menggunakan sinyal noisy, sampling rate, "
             "durasi, dan seed yang sama agar perbandingan lebih adil."
         )
+    # =====================================================
+    # AUDIO PLAYBACK: SEBELUM DAN SESUDAH FILTERING
+    # =====================================================
 
+    from io import BytesIO
+
+    st.markdown("---")
+    st.markdown("## Dengarkan Hasil Denoising")
+
+    st.caption(
+        "Dengarkan perbedaan audio sebelum dan sesudah proses "
+        "reduksi derau menggunakan ketiga metode."
+    )
+
+    # Fungsi mengubah sinyal menjadi file WAV yang dapat diputar
+    def convert_to_wav(signal, fs):
+        signal = np.asarray(signal, dtype=float)
+
+        # Batasi amplitudo agar tidak clipping
+        signal = np.clip(signal, -1.0, 1.0)
+
+        # Konversi ke format PCM 16-bit
+        audio_int16 = (signal * 32767).astype(np.int16)
+
+        # Buat file WAV dalam memori
+        buffer = BytesIO()
+        wavfile.write(buffer, fs, audio_int16)
+
+        return buffer.getvalue()
+
+    audio_cols = st.columns(2)
+
+    # -----------------------------------------------------
+    # SEBELUM FILTERING
+    # -----------------------------------------------------
+
+    with audio_cols[0]:
+
+        st.markdown("### 01 | Sebelum Filtering")
+
+        st.markdown("**Audio bersih (referensi)**")
+
+        clean_wav = convert_to_wav(
+            clean_signal,
+            sample_rate
+        )
+
+        st.audio(
+            clean_wav,
+            format="audio/wav"
+        )
+
+        st.markdown("**Audio dengan derau (noisy)**")
+
+        noisy_wav = convert_to_wav(
+            noisy_signal,
+            sample_rate
+        )
+
+        st.audio(
+            noisy_wav,
+            format="audio/wav"
+        )
+
+    # -----------------------------------------------------
+    # SESUDAH FILTERING
+    # -----------------------------------------------------
+
+    with audio_cols[1]:
+
+        st.markdown("### 02 | Sesudah Filtering")
+
+        audio_outputs = [
+            (
+                "Wiener Filter (STFT)",
+                results["Wiener Filter (STFT)"]
+            ),
+            (
+                "Savitzky-Golay Filter",
+                results["Savitzky-Golay Filter"]
+            ),
+            (
+                "Wavelet Denoising",
+                results["Wavelet Denoising"]
+            )
+        ]
+
+        for method_name, filtered_signal in audio_outputs:
+
+            st.markdown(f"**{method_name}**")
+
+            filtered_wav = convert_to_wav(
+                filtered_signal,
+                sample_rate
+            )
+
+            st.audio(
+                filtered_wav,
+                format="audio/wav"
+            )
     # =====================================================
     # 18. FOOTER
     # =====================================================
