@@ -12,18 +12,22 @@ from scipy.signal import stft, istft, savgol_filter
 
 
 # =========================================================
-# KONFIGURASI APLIKASI
+# 1. KONFIGURASI APLIKASI
+# Harus menjadi perintah Streamlit pertama.
 # =========================================================
 
 st.set_page_config(
     page_title="NoiseClean | PSD",
     page_icon="🎧",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-TARGET_SNR_DB = 35.0
 
-# Parameter eksperimen tetap
+# =========================================================
+# 2. PARAMETER EKSPERIMEN TETAP
+# =========================================================
+
 WIENER_FRAME = 512
 WIENER_ALPHA = 0.98
 
@@ -32,87 +36,145 @@ SAVGOL_POLYORDER = 3
 
 WAVELET_NAME = "db4"
 WAVELET_LEVEL = 3
-WAVELET_THRESHOLD = 1.0
+WAVELET_THRESHOLD = 1.00
+
+METHOD_ORDER = [
+    "Wiener Filter (STFT)",
+    "Savitzky-Golay Filter",
+    "Wavelet Denoising"
+]
+
+CHART_COLORS = [
+    "#3157D5",
+    "#0D9488",
+    "#D97706"
+]
 
 
 # =========================================================
-# CSS
+# 3. CSS / TAMPILAN
 # =========================================================
 
 def inject_css():
     st.markdown("""
     <style>
+
     .stApp {
-        background: #f3f5fb;
+        background-color: #F3F5FB;
         color: #172033;
     }
 
     [data-testid="stSidebar"] {
-        background: #151d32;
+        background-color: #151D32;
     }
 
     [data-testid="stSidebar"] * {
-        color: #e8ecf7;
+        color: #F9FAFB;
     }
 
     [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-        color: #aab5cc;
+        color: #B7C2D8;
+    }
+
+    [data-testid="stSidebar"] label {
+        color: #F9FAFB !important;
+    }
+
+    [data-testid="stSidebar"] input {
+        color: #172033 !important;
+        background-color: #FFFFFF !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] {
+        color: #172033 !important;
+        background-color: #FFFFFF !important;
     }
 
     [data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #e2e7f0;
-        border-radius: 13px;
+        background-color: #FFFFFF;
+        border: 1px solid #E1E7F0;
+        border-radius: 14px;
         padding: 18px;
         min-height: 120px;
     }
 
     [data-testid="stPlotlyChart"] {
-        background: white;
-        border: 1px solid #e2e7f0;
-        border-radius: 12px;
+        background-color: #FFFFFF;
+        border: 1px solid #E1E7F0;
+        border-radius: 14px;
         padding: 8px;
     }
 
+    [data-testid="stDataFrame"] {
+        background-color: #FFFFFF;
+        border-radius: 12px;
+    }
+
     .topbar {
-        background: white;
-        padding: 15px 20px;
-        border: 1px solid #e2e7f0;
-        border-radius: 13px;
-        margin-bottom: 25px;
+        background-color: #FFFFFF;
+        padding: 17px 22px;
+        border: 1px solid #E1E7F0;
+        border-radius: 14px;
+        margin-bottom: 28px;
         font-weight: 800;
+        font-size: 18px;
+        color: #172033;
     }
 
     .hero-label {
-        color: #5b5ce2;
-        font-size: 12px;
+        color: #5B5CE2;
+        font-size: 11px;
         font-weight: 800;
         letter-spacing: 2px;
+        margin-bottom: 10px;
     }
 
     .hero-title {
         font-size: 34px;
         font-weight: 850;
         color: #172033;
-        margin-top: 8px;
+        margin-bottom: 10px;
     }
 
     .hero-description {
         color: #667085;
-        margin-bottom: 20px;
+        font-size: 15px;
+        margin-bottom: 22px;
     }
 
     .section-label {
-        color: #667085;
-        font-size: 12px;
+        color: #AAB8D1;
+        font-size: 11px;
         font-weight: 800;
         letter-spacing: 1.5px;
-        margin-top: 15px;
+        margin-top: 18px;
+        margin-bottom: 10px;
+    }
+
+    .fixed-method {
+        background-color: #202D49;
+        border: 1px solid #394967;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 12px;
+        font-size: 13px;
+    }
+
+    .fixed-method strong {
+        display: block;
+        color: #FFFFFF;
+        margin-bottom: 7px;
+    }
+
+    .fixed-method span {
+        display: block;
+        color: #D6DEEC;
+        margin-top: 4px;
     }
 
     .footer {
         text-align: center;
-        color: #98a2b3;
+        color: #98A2B3;
         padding: 30px 0;
         font-size: 12px;
     }
@@ -122,15 +184,17 @@ def inject_css():
 
 
 # =========================================================
-# FUNGSI SINYAL
+# 4. FUNGSI PENGOLAHAN SINYAL
 # =========================================================
 
 def to_float_audio(samples):
     raw = np.asarray(samples)
 
+    # Mengubah stereo menjadi mono
     if raw.ndim == 2:
-        raw = raw.mean(axis=1)
+        raw = raw.astype(float).mean(axis=1)
 
+    # Normalisasi berdasarkan tipe data WAV
     if raw.dtype == np.uint8:
         values = (raw.astype(float) - 128) / 128
 
@@ -142,9 +206,7 @@ def to_float_audio(samples):
     else:
         values = raw.astype(float)
 
-    values = np.nan_to_num(values)
-
-    return values
+    return np.nan_to_num(values)
 
 
 def normalize_signal(x):
@@ -153,7 +215,9 @@ def normalize_signal(x):
     peak = np.max(np.abs(x))
 
     if peak == 0:
-        raise ValueError("Sinyal kosong atau memiliki amplitudo nol.")
+        raise ValueError(
+            "Sinyal kosong atau memiliki amplitudo nol."
+        )
 
     return x / peak * 0.8
 
@@ -199,7 +263,8 @@ def make_sample_audio(kind, fs, duration):
 
         envelope = np.minimum(t / 0.05, 1)
         envelope *= np.minimum(
-            (duration - t) / 0.1, 1
+            (duration - t) / 0.1,
+            1
         )
 
         x *= envelope
@@ -215,8 +280,8 @@ def make_sample_audio(kind, fs, duration):
 
 def add_awgn(clean, noise_percent, seed):
     """
-    Menambahkan Gaussian noise berdasarkan persentase RMS
-    sinyal bersih.
+    Menambahkan Gaussian noise berdasarkan persentase
+    RMS sinyal bersih.
     """
 
     if noise_percent <= 0:
@@ -236,7 +301,7 @@ def add_awgn(clean, noise_percent, seed):
 
 
 # =========================================================
-# WIENER FILTER STFT
+# 5. WIENER FILTER BERBASIS STFT
 # =========================================================
 
 def apply_wiener(signal, fs):
@@ -245,7 +310,9 @@ def apply_wiener(signal, fs):
     nperseg = min(WIENER_FRAME, len(x))
 
     if nperseg < 16:
-        raise ValueError("Sinyal terlalu pendek untuk Wiener STFT.")
+        raise ValueError(
+            "Sinyal terlalu pendek untuk Wiener STFT."
+        )
 
     noverlap = nperseg // 2
 
@@ -259,7 +326,7 @@ def apply_wiener(signal, fs):
 
     power = np.abs(Z) ** 2
 
-    # Estimasi noise berdasarkan persentil daya antar-frame.
+    # Estimasi daya noise
     noise_power = np.percentile(
         power,
         20,
@@ -267,7 +334,7 @@ def apply_wiener(signal, fs):
         keepdims=True
     )
 
-    # Gain Wiener dengan alpha sebagai faktor penghalus.
+    # Wiener gain
     gain = np.maximum(
         1 - WIENER_ALPHA * noise_power /
         (power + 1e-12),
@@ -297,7 +364,7 @@ def apply_wiener(signal, fs):
 
 
 # =========================================================
-# SAVITZKY-GOLAY
+# 6. SAVITZKY-GOLAY FILTER
 # =========================================================
 
 def apply_savgol(signal):
@@ -328,7 +395,7 @@ def apply_savgol(signal):
 
 
 # =========================================================
-# WAVELET DENOISING
+# 7. WAVELET DENOISING
 # =========================================================
 
 def apply_wavelet(signal):
@@ -390,13 +457,13 @@ def apply_wavelet(signal):
 
 
 # =========================================================
-# METRIK EVALUASI
+# 8. METRIK EVALUASI
 # =========================================================
 
 def calculate_metrics(clean, noisy, filtered):
-    clean = np.asarray(clean)
-    noisy = np.asarray(noisy)
-    filtered = np.asarray(filtered)
+    clean = np.asarray(clean, dtype=float)
+    noisy = np.asarray(noisy, dtype=float)
+    filtered = np.asarray(filtered, dtype=float)
 
     n = min(
         len(clean),
@@ -439,46 +506,143 @@ def calculate_metrics(clean, noisy, filtered):
 
 
 # =========================================================
-# GRAFIK
+# 9. GRAFIK SINYAL
 # =========================================================
 
-def make_signal_chart(time, clean, noisy, filtered, title):
+
+
+def make_signal_chart(
+    time,
+    clean,
+    noisy,
+    filtered,
+    title
+):
+    # Batasi jumlah titik agar grafik tetap ringan
+    max_points = 5000
+
+    step = max(
+        1,
+        int(np.ceil(len(time) / max_points))
+    )
+
+    # Ambil cuplikan 25 milidetik
+    view_seconds = 0.025
+    mask = time <= view_seconds
+
+    if np.sum(mask) < 2:
+        mask = np.ones(len(time), dtype=bool)
+
+    t = time[mask][::step]
+    clean_plot = clean[mask][::step]
+    noisy_plot = noisy[mask][::step]
+    filtered_plot = filtered[mask][::step]
+
+    # Buat satu grafik dengan tiga garis
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
-        x=time,
-        y=clean,
+        x=t,
+        y=clean_plot,
+        mode="lines",
         name="Sinyal bersih",
-        line=dict(color="#16a085", width=1.5)
+        line=dict(
+            color="#0D9488",
+            width=2
+        ),
+        opacity=0.95
     ))
 
     fig.add_trace(go.Scatter(
-        x=time,
-        y=noisy,
+        x=t,
+        y=noisy_plot,
+        mode="lines",
         name="Sinyal noisy",
-        line=dict(color="#e67e22", width=1)
+        line=dict(
+            color="#E69A36",
+            width=1.3
+        ),
+        opacity=0.75
     ))
 
     fig.add_trace(go.Scatter(
-        x=time,
-        y=filtered,
+        x=t,
+        y=filtered_plot,
+        mode="lines",
         name="Sinyal hasil filter",
-        line=dict(color="#4f46e5", width=1.5)
+        line=dict(
+            color="#3157D5",
+            width=2
+        ),
+        opacity=0.95
     ))
 
     fig.update_layout(
-        title=title,
-        xaxis_title="Waktu (detik)",
-        yaxis_title="Amplitudo",
-        height=420,
+        title=dict(
+            text=title,
+            x=0.02,
+            xanchor="left",
+            font=dict(
+                family="Arial",
+                size=19,
+                color="#172033"
+            )
+        ),
+
+        template="plotly_white",
+        height=520,
+
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FFFFFF",
+
+        font=dict(
+            family="Arial",
+            size=12,
+            color="#344054"
+        ),
+
         hovermode="x unified",
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        legend=dict(orientation="h", y=1.12)
+
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+
+        margin=dict(
+            l=65,
+            r=35,
+            t=110,
+            b=70
+        )
+    )
+
+    fig.update_xaxes(
+        title_text="Waktu (detik)",
+        showgrid=True,
+        gridcolor="#E9EDF4",
+        zeroline=False,
+        showline=True,
+        linecolor="#CBD5E1"
+    )
+
+    fig.update_yaxes(
+        title_text="Amplitudo",
+        showgrid=True,
+        gridcolor="#E9EDF4",
+        zeroline=True,
+        zerolinecolor="#CBD5E1"
     )
 
     return fig
 
+
+# =========================================================
+# 10. GRAFIK METRIK SATU FILTER
+# =========================================================
 
 def make_metric_chart(name, value, title, suffix=""):
     fig = go.Figure()
@@ -488,23 +652,118 @@ def make_metric_chart(name, value, title, suffix=""):
         y=[value],
         text=[f"{value:.4f}{suffix}"],
         textposition="outside",
-        marker_color="#5b5ce2"
+        marker_color="#3157D5",
+        width=0.45
     ))
 
     fig.update_layout(
-        title=title,
+        title=dict(
+            text=title,
+            x=0.05,
+            font=dict(size=15)
+        ),
+        template="plotly_white",
         height=320,
         showlegend=False,
         yaxis_title=title,
-        paper_bgcolor="white",
-        plot_bgcolor="white"
+        font=dict(
+            family="Arial",
+            size=12,
+            color="#344054"
+        ),
+        margin=dict(
+            l=40,
+            r=25,
+            t=65,
+            b=55
+        )
     )
 
     return fig
 
 
 # =========================================================
-# SIDEBAR
+# 11. GRAFIK PERBANDINGAN TIGA METODE
+# =========================================================
+
+def make_comparison_chart(
+    dataframe,
+    metric,
+    title,
+    y_title,
+    suffix="",
+    decimals=2,
+    zero_line=False
+):
+    fig = go.Figure()
+
+    values = dataframe[metric].astype(float)
+
+    text_values = [
+        f"{value:+.{decimals}f}{suffix}"
+        if metric == "Peningkatan SNR (dB)"
+        else f"{value:.{decimals}f}{suffix}"
+        for value in values
+    ]
+
+    fig.add_trace(go.Bar(
+        x=dataframe["Metode"].astype(str),
+        y=values,
+        text=text_values,
+        textposition="outside",
+        marker_color=CHART_COLORS,
+        marker_line=dict(
+            width=0
+        ),
+        cliponaxis=False
+    ))
+
+    if zero_line:
+        fig.add_hline(
+            y=0,
+            line_dash="dash",
+            line_color="#64748B",
+            line_width=1
+        )
+
+    fig.update_layout(
+        title=dict(
+            text=title,
+            x=0.02,
+            font=dict(size=17)
+        ),
+        xaxis_title="Metode denoising",
+        yaxis_title=y_title,
+        template="plotly_white",
+        height=440,
+        showlegend=False,
+        font=dict(
+            family="Arial",
+            size=12,
+            color="#344054"
+        ),
+        margin=dict(
+            l=60,
+            r=40,
+            t=80,
+            b=100
+        ),
+        xaxis=dict(
+            tickangle=0,
+            showgrid=False
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="#E8ECF3",
+            zeroline=False
+        )
+    )
+
+    return fig
+
+
+# =========================================================
+# 12. TAMPILAN SIDEBAR
 # =========================================================
 
 inject_css()
@@ -512,7 +771,6 @@ inject_css()
 with st.sidebar:
 
     st.markdown("## 🎧 NoiseClean")
-
     st.caption("Digital Signal Processing Laboratory")
 
     st.markdown("---")
@@ -548,18 +806,18 @@ with st.sidebar:
 
         duration = st.slider(
             "Durasi (detik)",
-            1.0,
-            10.0,
-            5.0,
-            0.5
+            min_value=1.0,
+            max_value=10.0,
+            value=5.0,
+            step=0.5
         )
 
         frequency = st.slider(
             "Frekuensi fundamental (Hz)",
-            100,
-            min(2000, sample_rate // 2 - 1),
-            min(440, sample_rate // 2 - 1),
-            10
+            min_value=100,
+            max_value=min(2000, sample_rate // 2 - 1),
+            value=min(440, sample_rate // 2 - 1),
+            step=10
         )
 
     elif source == "Contoh audio referensi":
@@ -665,10 +923,14 @@ with st.sidebar:
 
 
 # =========================================================
-# MEMBENTUK SINYAL BERSIH
+# 13. PROSES UTAMA APLIKASI
 # =========================================================
 
 try:
+
+    # -----------------------------------------------------
+    # MEMBENTUK SINYAL BERSIH
+    # -----------------------------------------------------
 
     if source == "Unggah WAV":
 
@@ -682,10 +944,12 @@ try:
             BytesIO(uploaded.getvalue())
         )
 
-        clean_signal = to_float_audio(raw)
-
         if fs <= 0:
-            raise ValueError("Sampling rate WAV tidak valid.")
+            raise ValueError(
+                "Sampling rate WAV tidak valid."
+            )
+
+        clean_signal = to_float_audio(raw)
 
         # Batasi durasi maksimal 30 detik.
         clean_signal = clean_signal[:int(fs * 30)]
@@ -713,20 +977,27 @@ try:
         )
 
     if len(clean_signal) < 100:
-        raise ValueError("Sinyal terlalu pendek untuk diproses.")
+        raise ValueError(
+            "Sinyal terlalu pendek untuk diproses."
+        )
 
-    # Input noisy yang sama untuk seluruh metode.
+    # -----------------------------------------------------
+    # MEMBUAT INPUT NOISY YANG SAMA
+    # -----------------------------------------------------
+
     noisy_signal = add_awgn(
         clean_signal,
         noise_percent,
         int(random_seed)
     )
 
-    # =====================================================
+    # -----------------------------------------------------
     # PROSES KETIGA FILTER
-    # =====================================================
+    # -----------------------------------------------------
 
-    with st.spinner("Memproses ketiga metode filtering..."):
+    with st.spinner(
+        "Memproses Wiener, Savitzky-Golay, dan Wavelet..."
+    ):
 
         results = {
             "Wiener Filter (STFT)": apply_wiener(
@@ -742,6 +1013,10 @@ try:
                 noisy_signal
             )
         }
+
+    # -----------------------------------------------------
+    # MENGHITUNG METRIK KETIGA METODE
+    # -----------------------------------------------------
 
     metric_rows = []
 
@@ -760,8 +1035,20 @@ try:
 
     full_df = pd.DataFrame(metric_rows)
 
+    # Pastikan urutan metode selalu konsisten.
+    full_df["Metode"] = pd.Categorical(
+        full_df["Metode"],
+        categories=METHOD_ORDER,
+        ordered=True
+    )
+
+    full_df = (
+        full_df.sort_values("Metode")
+        .reset_index(drop=True)
+    )
+
     # =====================================================
-    # HEADER
+    # 14. HEADER
     # =====================================================
 
     st.markdown("""
@@ -798,14 +1085,15 @@ try:
     )
 
     # =====================================================
-    # TAMPILAN FOKUS SATU FILTER
+    # 15. ANALISIS FOKUS SATU FILTER
     # =====================================================
 
+    st.markdown("---")
     st.markdown("## Analisis filter")
 
     selected_method = st.selectbox(
         "Pilih metode yang ingin dianalisis",
-        list(results.keys())
+        METHOD_ORDER
     )
 
     selected_output = results[selected_method]
@@ -838,6 +1126,7 @@ try:
 
     time = np.arange(len(clean_signal)) / sample_rate
 
+    # Grafik sinyal filter yang dipilih.
     st.plotly_chart(
         make_signal_chart(
             time,
@@ -846,10 +1135,13 @@ try:
             selected_output,
             f"Visualisasi {selected_method}"
         ),
-        use_container_width=True
+        use_container_width=True,
+        config={"displaylogo": False}
     )
 
-    # Grafik metrik khusus metode yang dipilih.
+    # Grafik metrik khusus metode terpilih.
+    st.markdown("### Visualisasi metrik filter")
+
     graph_cols = st.columns(3)
 
     with graph_cols[0]:
@@ -860,7 +1152,8 @@ try:
                 "SNR (dB)",
                 " dB"
             ),
-            use_container_width=True
+            use_container_width=True,
+            config={"displaylogo": False}
         )
 
     with graph_cols[1]:
@@ -868,9 +1161,11 @@ try:
             make_metric_chart(
                 selected_method,
                 selected_metrics["RMSE"],
-                "RMSE"
+                "RMSE",
+                ""
             ),
-            use_container_width=True
+            use_container_width=True,
+            config={"displaylogo": False}
         )
 
     with graph_cols[2]:
@@ -881,264 +1176,269 @@ try:
                 "Peningkatan SNR",
                 " dB"
             ),
-            use_container_width=True
+            use_container_width=True,
+            config={"displaylogo": False}
         )
 
     # =====================================================
-    # PERBANDINGAN AKHIR KETIGA METODE
+    # 16. PERBANDINGAN AKHIR KETIGA METODE
     # =====================================================
 
     st.markdown("---")
-
     st.markdown("## Perbandingan akhir ketiga metode")
 
     st.caption(
-        f"Semua metode diuji menggunakan sinyal, sampling rate, "
+        f"Ketiga metode diuji menggunakan sinyal, sampling rate, "
         f"durasi, seed, dan noise {noise_percent}% RMS yang sama."
     )
 
-    comparison = full_df.sort_values(
-        "SNR (dB)",
-        ascending=False
-    ).reset_index(drop=True)
+    if len(full_df) != 3:
 
-    best_snr = comparison.iloc[0]
-
-    best_rmse = full_df.loc[
-        full_df["RMSE"].idxmin()
-    ]
-
-    summary_cols = st.columns(2)
-
-    with summary_cols[0]:
-        st.metric(
-            "SNR tertinggi",
-            str(best_snr["Metode"]),
-            f"{best_snr['SNR (dB)']:.2f} dB"
+        st.error(
+            "Data perbandingan belum lengkap. "
+            "Pastikan ketiga metode berhasil diproses."
         )
 
-    with summary_cols[1]:
-        st.metric(
-            "RMSE terendah",
-            str(best_rmse["Metode"]),
-            f"{best_rmse['RMSE']:.6f}"
-        )
+    else:
 
-    # Kartu masing-masing metode.
-    st.markdown("### Hasil setiap metode")
+        # -------------------------------------------------
+        # TIGA KARTU HASIL
+        # -------------------------------------------------
 
-    summary_cards = st.columns(3)
+        st.markdown("### Ringkasan hasil setiap metode")
 
-    for col, (_, row) in zip(
-        summary_cards,
-        full_df.iterrows()
-    ):
+        cols = st.columns(3)
 
-        with col:
+        for col, (_, row) in zip(
+            cols,
+            full_df.iterrows()
+        ):
 
-            st.markdown(f"#### {row['Metode']}")
+            with col:
 
-            st.metric(
+                with st.container(border=True):
+
+                    st.markdown(
+                        f"#### {row['Metode']}"
+                    )
+
+                    st.metric(
+                        "SNR",
+                        f"{row['SNR (dB)']:.2f} dB"
+                    )
+
+                    st.metric(
+                        "RMSE",
+                        f"{row['RMSE']:.6f}"
+                    )
+
+                    st.metric(
+                        "Peningkatan SNR",
+                        f"{row['Peningkatan SNR (dB)']:+.2f} dB"
+                    )
+
+        # -------------------------------------------------
+        # EVALUASI HASIL
+        # -------------------------------------------------
+
+        best_snr = full_df.loc[
+            full_df["SNR (dB)"].idxmax()
+        ]
+
+        best_rmse = full_df.loc[
+            full_df["RMSE"].idxmin()
+        ]
+
+        st.markdown("### Hasil evaluasi")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.markdown("**SNR tertinggi**")
+
+            st.success(
+                f"{best_snr['Metode']} — "
+                f"{best_snr['SNR (dB)']:.2f} dB"
+            )
+
+        with col2:
+
+            st.markdown("**RMSE terendah**")
+
+            st.success(
+                f"{best_rmse['Metode']} — "
+                f"{best_rmse['RMSE']:.6f}"
+            )
+
+        # -------------------------------------------------
+        # GRAFIK PERBANDINGAN
+        # -------------------------------------------------
+
+        st.markdown("### Visualisasi perbandingan")
+
+        tab1, tab2, tab3 = st.tabs([
+            "Perbandingan SNR",
+            "Perbandingan RMSE",
+            "Peningkatan SNR"
+        ])
+
+        with tab1:
+
+            fig = make_comparison_chart(
+                full_df,
                 "SNR (dB)",
-                f"{row['SNR (dB)']:.2f} dB"
+                "Perbandingan SNR Ketiga Metode",
+                "SNR (dB)",
+                suffix=" dB",
+                decimals=2
             )
 
-            st.metric(
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False}
+            )
+
+        with tab2:
+
+            fig = make_comparison_chart(
+                full_df,
                 "RMSE",
-                f"{row['RMSE']:.6f}"
+                "Perbandingan RMSE Ketiga Metode",
+                "RMSE (lebih rendah lebih baik)",
+                decimals=6
             )
 
-            st.metric(
-                "Peningkatan SNR",
-                f"{row['Peningkatan SNR (dB)']:+.2f} dB"
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False}
             )
 
-    compare_tabs = st.tabs([
-        "Grafik SNR",
-        "Grafik RMSE",
-        "Peningkatan SNR"
-    ])
+        with tab3:
 
-    colors = [
-        "#4f46e5",
-        "#0f9f8a",
-        "#f59e0b"
-    ]
+            fig = make_comparison_chart(
+                full_df,
+                "Peningkatan SNR (dB)",
+                "Peningkatan SNR Ketiga Metode",
+                "Peningkatan SNR (dB)",
+                suffix=" dB",
+                decimals=2,
+                zero_line=True
+            )
 
-    with compare_tabs[0]:
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False}
+            )
 
-        fig = go.Figure(go.Bar(
-            x=full_df["Metode"],
-            y=full_df["SNR (dB)"],
-            text=[
-                f"{v:.2f} dB"
-                for v in full_df["SNR (dB)"]
-            ],
-            textposition="outside",
-            marker_color=colors
-        ))
+        # -------------------------------------------------
+        # TABEL KOMPARASI
+        # -------------------------------------------------
 
-        fig.update_layout(
-            title="Perbandingan SNR ketiga metode",
-            xaxis_title="Metode",
-            yaxis_title="SNR (dB)",
-            height=400,
-            showlegend=False
+        st.markdown("### Tabel komparasi akhir")
+
+        display_df = full_df.copy()
+
+        display_df["Metode"] = (
+            display_df["Metode"].astype(str)
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
+        st.dataframe(
+            display_df.style.format({
+                "SNR input (dB)": "{:.2f}",
+                "SNR (dB)": "{:.2f}",
+                "RMSE": "{:.6f}",
+                "Peningkatan SNR (dB)": "{:+.2f}"
+            }),
+            use_container_width=True,
+            hide_index=True
         )
 
-    with compare_tabs[1]:
+        # -------------------------------------------------
+        # DOWNLOAD CSV
+        # -------------------------------------------------
 
-        fig = go.Figure(go.Bar(
-            x=full_df["Metode"],
-            y=full_df["RMSE"],
-            text=[
-                f"{v:.6f}"
-                for v in full_df["RMSE"]
-            ],
-            textposition="outside",
-            marker_color=colors
-        ))
-
-        fig.update_layout(
-            title="Perbandingan RMSE ketiga metode",
-            xaxis_title="Metode",
-            yaxis_title="RMSE (lebih rendah lebih baik)",
-            height=400,
-            showlegend=False
+        st.download_button(
+            "⬇️ Unduh hasil perbandingan CSV",
+            display_df.to_csv(
+                index=False
+            ).encode("utf-8"),
+            file_name=(
+                f"NoiseClean_Perbandingan_"
+                f"{noise_percent}persen.csv"
+            ),
+            mime="text/csv"
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
-    with compare_tabs[2]:
-
-        fig = go.Figure(go.Bar(
-            x=full_df["Metode"],
-            y=full_df["Peningkatan SNR (dB)"],
-            text=[
-                f"{v:+.2f} dB"
-                for v in full_df["Peningkatan SNR (dB)"]
-            ],
-            textposition="outside",
-            marker_color=colors
-        ))
-
-        fig.add_hline(
-            y=0,
-            line_dash="dash",
-            line_color="#64748b"
-        )
-
-        fig.update_layout(
-            title="Peningkatan SNR terhadap sinyal noisy",
-            xaxis_title="Metode",
-            yaxis_title="Peningkatan SNR (dB)",
-            height=400,
-            showlegend=False
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
+        st.caption(
+            "SNR yang lebih tinggi menunjukkan kualitas sinyal hasil "
+            "filter yang lebih baik, sedangkan RMSE yang lebih rendah "
+            "menunjukkan hasil lebih dekat dengan sinyal referensi bersih."
         )
 
     # =====================================================
-    # TABEL KOMPARASI
+    # 17. METODOLOGI
     # =====================================================
 
-    st.markdown("### Tabel komparasi")
+    with st.expander("Metode dan interpretasi"):
 
-    st.dataframe(
-        comparison.style.format({
-            "SNR input (dB)": "{:.2f}",
-            "SNR (dB)": "{:.2f}",
-            "RMSE": "{:.6f}",
-            "Peningkatan SNR (dB)": "{:+.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.download_button(
-        "⬇️ Unduh perbandingan ketiga metode (CSV)",
-        comparison.to_csv(
-            index=False
-        ).encode("utf-8"),
-        file_name=f"noiseclean_comparison_noise_{noise_percent}pct.csv",
-        mime="text/csv"
-    )
-
-    # =====================================================
-    # INFORMASI PARAMETER
-    # =====================================================
-
-    with st.expander("Metode dan parameter eksperimen"):
-
-        st.markdown("#### Wiener Filter (STFT)")
+        st.markdown("#### Wiener Filter berbasis STFT")
 
         st.write(
-            f"Frame STFT: {WIENER_FRAME} sampel"
-        )
-
-        st.write(
-            f"Alpha: {WIENER_ALPHA}"
+            "Wiener Filter STFT melakukan estimasi komponen noise "
+            "pada domain waktu-frekuensi menggunakan Short-Time "
+            "Fourier Transform (STFT), kemudian menerapkan gain "
+            "untuk menekan komponen derau."
         )
 
         st.markdown("#### Savitzky-Golay Filter")
 
         st.write(
-            f"Window length: {SAVGOL_WINDOW}"
-        )
-
-        st.write(
-            f"Polynomial order: {SAVGOL_POLYORDER}"
+            "Savitzky-Golay melakukan pemulusan sinyal menggunakan "
+            "fitting polinomial lokal pada jendela sampel."
         )
 
         st.markdown("#### Wavelet Denoising")
 
         st.write(
-            f"Wavelet family: {WAVELET_NAME}"
-        )
-
-        st.write(
-            f"Decomposition level: {WAVELET_LEVEL}"
-        )
-
-        st.write(
-            f"Threshold scale: {WAVELET_THRESHOLD}"
+            "Wavelet Denoising menggunakan Discrete Wavelet Transform "
+            "(DWT). Koefisien detail diberi soft threshold berdasarkan "
+            "estimasi noise MAD, kemudian direkonstruksi."
         )
 
         st.markdown("#### Metrik evaluasi")
 
         st.write(
-            "SNR dihitung terhadap clean reference. "
-            "Nilai lebih tinggi menunjukkan hasil reduksi noise lebih baik."
+            "SNR dihitung dengan membandingkan daya sinyal referensi "
+            "bersih terhadap daya error. Nilai SNR lebih tinggi "
+            "menunjukkan hasil yang lebih baik."
         )
 
         st.write(
-            "RMSE merupakan akar rata-rata kuadrat error "
-            "antara sinyal hasil filtering dan clean reference. "
-            "Nilai lebih rendah menunjukkan error lebih kecil."
+            "RMSE merupakan akar rata-rata kuadrat selisih antara "
+            "sinyal referensi bersih dan sinyal hasil filter. "
+            "Nilai RMSE lebih rendah menunjukkan hasil lebih dekat "
+            "dengan sinyal referensi."
         )
 
-        st.warning(
-            "Hasil pada sinyal sintetis merupakan pengujian simulasi. "
-            "Validasi pada rekaman audio asli tetap diperlukan."
+        st.info(
+            "Ketiga metode menggunakan sinyal noisy, sampling rate, "
+            "durasi, dan seed yang sama agar perbandingan lebih adil."
         )
 
-    st.markdown(
-        '<div class="footer">'
-        'NoiseClean · Aplikasi Pengolahan Sinyal Digital · Kelompok 6'
-        '</div>',
-        unsafe_allow_html=True
-    )
+    # =====================================================
+    # 18. FOOTER
+    # =====================================================
+
+    st.markdown("""
+    <div class="footer">
+        NoiseClean · Aplikasi Pengolahan Sinyal Digital · Kelompok 6
+    </div>
+    """, unsafe_allow_html=True)
+
 
 except Exception as error:
 
