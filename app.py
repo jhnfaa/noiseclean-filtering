@@ -1447,3 +1447,127 @@ except Exception as error:
     )
 
     st.exception(error)
+
+
+# =====================================================
+# GRAFIK PERBANDINGAN WAVEFORM KETIGA METODE
+# =====================================================
+
+st.markdown("---")
+st.markdown("## Perbandingan waveform ketiga metode")
+
+st.caption(
+    f"Perbandingan sinyal bersih, sinyal noisy, dan hasil "
+    f"ketiga metode denoising pada noise {noise_percent}% RMS."
+)
+
+# Ambil hasil filter dari dictionary results
+wiener_signal = results["Wiener Filter (STFT)"]
+savgol_signal = results["Savitzky-Golay Filter"]
+wavelet_signal = results["Wavelet Denoising"]
+
+# Batasi tampilan grafik agar lebih mudah dibaca
+view_duration = min(0.5, len(clean_signal) / sample_rate)
+max_points = 5000
+
+sample_count = min(
+    len(clean_signal),
+    int(view_duration * sample_rate)
+)
+
+step = max(1, int(np.ceil(sample_count / max_points)))
+
+time_plot = (
+    np.arange(sample_count)[::step] / sample_rate
+)
+
+clean_plot = clean_signal[:sample_count:step]
+noisy_plot = noisy_signal[:sample_count:step]
+wiener_plot = wiener_signal[:sample_count:step]
+savgol_plot = savgol_signal[:sample_count:step]
+wavelet_plot = wavelet_signal[:sample_count:step]
+
+fig = go.Figure()
+
+signals = [
+    (clean_plot, "Sinyal bersih (referensi)", "#16A34A", 2.4),
+    (noisy_plot, f"Sinyal noisy ({noise_percent}%)", "#F59E0B", 1.3),
+    (wiener_plot, "Wiener Filter (STFT)", "#2563EB", 1.8),
+    (savgol_plot, "Savitzky-Golay", "#9333EA", 1.8),
+    (wavelet_plot, "Wavelet Denoising", "#DC2626", 1.8),
+]
+
+for signal, name, color, width in signals:
+    fig.add_trace(
+        go.Scatter(
+            x=time_plot,
+            y=signal,
+            mode="lines",
+            name=name,
+            line=dict(
+                color=color,
+                width=width
+            )
+        )
+    )
+
+fig.update_layout(
+    title=dict(
+        text="Perbandingan Waveform Sebelum dan Sesudah Reduksi Derau",
+        x=0.5,
+        xanchor="center",
+        font=dict(size=19, color="#172033")
+    ),
+    xaxis_title="Waktu (detik)",
+    yaxis_title="Amplitudo",
+    template="plotly_white",
+    height=600,
+    hovermode="x unified",
+    font=dict(
+        family="Arial",
+        size=13,
+        color="#344054"
+    ),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="center",
+        x=0.5
+    ),
+    margin=dict(
+        l=70,
+        r=40,
+        t=130,
+        b=75
+    ),
+    plot_bgcolor="#FFFFFF",
+    paper_bgcolor="#FFFFFF"
+)
+
+fig.update_xaxes(
+    showgrid=True,
+    gridcolor="#E5E7EB"
+)
+
+fig.update_yaxes(
+    showgrid=True,
+    gridcolor="#E5E7EB",
+    zeroline=True,
+    zerolinecolor="#94A3B8"
+)
+
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={
+        "displaylogo": False,
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": "Perbandingan_Waveform_3_Metode",
+            "height": 900,
+            "width": 1600,
+            "scale": 2
+        }
+    }
+)
